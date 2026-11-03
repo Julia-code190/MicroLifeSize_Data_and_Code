@@ -1,0 +1,83 @@
+# Builds the Microbial Body Mass Estimator (the Shiny app in app/) as a static
+# Shinylive site and publishes it with GitHub Pages. The app then runs entirely
+# in the visitor's web browser, so no R server is needed.
+#
+# Adapted from Posit's shinylive workflow:
+# https://github.com/posit-dev/r-shinylive/tree/actions-v1/examples
+#
+# One-time setup: Settings > Pages > Build and deployment > Source: "GitHub Actions".
+# The site rebuilds whenever something in app/ changes on main, or on demand from
+# the Actions tab ("Run workflow"). If a rebuild fails, the last published version
+# stays online.
+
+name: Deploy app to GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/**"
+      - ".github/workflows/deploy-app.yml"
+
+permissions:
+  contents: read
+
+# Never run two deployments at once
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rstudio/shiny-workflows/setup-r-package@v1
+        with:
+          packages: |
+            renv
+            shinylive
+            sessioninfo
+
+      - name: Install the packages the app uses
+        shell: Rscript {0}
+        run: |
+          pak::pak(unique(renv::dependencies("app")$Package))
+
+      - name: Build site
+        shell: Rscript {0}
+        run: |
+          shinylive::export(
+            "app", "site",
+            template_params = list(title = "Microbial Body Mass Estimator")
+          )
+
+      - name: Upload site artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "site"
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
